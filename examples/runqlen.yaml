@@ -1,0 +1,8 @@
+metrics:
+  histograms:
+    - name: run_queue_length
+      help: "Histogram of run queue lengths observed"
+      bucket_type: linear
+      bucket_min: 0
+      bucket_max: 32
+      bucket_multiplier: 1
