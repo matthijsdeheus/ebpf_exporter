@@ -1,0 +1,9 @@
+metrics:
+  counters:
+    - name: run_queue_latency
+      help: "Counter of run queue latency buckets (bucket index represents log2(latency in microseconds))"
+      labels:
+        - name: bucket
+          size: 4
+          decoders:
+            - name: uint
