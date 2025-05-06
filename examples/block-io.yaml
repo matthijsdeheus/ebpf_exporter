@@ -1,0 +1,10 @@
+metrics:
+  counters:
+    - name: block_io_time_microseconds_total
+      help: Total Block I/O time in microseconds
+      labels:
+        - name: device
+          size: 4
+          decoders:
+            - name: majorminor
+        

@@ -9,7 +9,6 @@ metrics:
             - name: uint
             - name: cgroup
               allow_unknown: true
-            #- name: uint
         - name: bucket
           size: 4
           decoders:
