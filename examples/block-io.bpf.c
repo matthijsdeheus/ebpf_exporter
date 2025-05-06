@@ -9,17 +9,27 @@
 
 extern int LINUX_KERNEL_VERSION __kconfig;
 
+struct start_val_t {
+    u64 ts;
+    u64 cg_id;
+};
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 10000);
     __type(key, struct request *);
-    __type(value, u64);
+    __type(value, struct start_val_t);
 } start SEC(".maps");
+
+struct io_key_t {
+    u64 cg_id;
+    u32 dev;
+} __attribute__((packed));
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, MAX_DISKS);
-    __type(key, u32);
+    __uint(max_entries, 10240);
+    __type(key, struct io_key_t);
     __type(value, u64);
 } block_io_time_microseconds_total SEC(".maps");
 
@@ -45,8 +55,10 @@ static __always_inline struct gendisk *get_disk(void *request)
 // Note the start time
 static __always_inline int trace_rq_start(struct request *rq)
 {
-    u64 ts = bpf_ktime_get_ns();
-    bpf_map_update_elem(&start, &rq, &ts, 0);
+    struct start_val_t val = {};
+    val.ts = bpf_ktime_get_ns();
+    val.cg_id = bpf_get_current_cgroup_id();
+    bpf_map_update_elem(&start, &rq, &val, BPF_ANY);
     return 0;
 }
 
@@ -63,37 +75,31 @@ int block_rq_issue(struct bpf_raw_tracepoint_args *ctx)
 SEC("raw_tp/block_rq_complete")
 int block_rq_complete(struct bpf_raw_tracepoint_args *ctx)
 {
-    u64 *tsp, delta_us, ts = bpf_ktime_get_ns();
-    struct gendisk *disk;
-    struct request *rq = (struct request *) ctx->args[0];
-    u32 dev;
-    
-    // Look up start time
-    tsp = bpf_map_lookup_elem(&start, &rq);
-    if (!tsp) {
+    struct request *rq = (void *)ctx->args[0];
+    struct start_val_t *svp = bpf_map_lookup_elem(&start, &rq);
+    if (!svp) {
         return 0;
     }
+    
+    u64 delta_us = (bpf_ktime_get_ns() - svp->ts) / 1000;
+    u64 cg_id = svp->cg_id;
 
-    // Compute the difference in time
-    delta_us = (ts - *tsp) / 1000;
+    bpf_map_delete_elem(&start, &rq);
+    struct gendisk *disk = get_disk(rq);
 
-    disk = get_disk(rq);
-    if (disk) {
-        dev = MKDEV(BPF_CORE_READ(disk, major), BPF_CORE_READ(disk, first_minor));
-    } else {
-        dev = 0;
-    }
+    u32 dev = disk ? MKDEV(BPF_CORE_READ(disk, major), BPF_CORE_READ(disk, first_minor)) : 0;
+    
+    struct io_key_t key = {
+        .cg_id = cg_id,
+        .dev = dev,
+    };
 
-    // Store result in per disk array
-    u64 *slot = bpf_map_lookup_elem(&block_io_time_microseconds_total, &dev);
+    u64 *slot = bpf_map_lookup_elem(&block_io_time_microseconds_total, &key);
     if (slot) {
         __sync_fetch_and_add(slot, delta_us);
     } else {
-        bpf_map_update_elem(&block_io_time_microseconds_total, &dev, &delta_us, BPF_ANY);
+        bpf_map_update_elem(&block_io_time_microseconds_total, &key, &delta_us, BPF_ANY);
     }
-
-    // Cleanup
-    bpf_map_delete_elem(&start, &rq);
 
     return 0;
 }

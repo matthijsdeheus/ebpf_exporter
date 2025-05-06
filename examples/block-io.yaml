@@ -3,6 +3,12 @@ metrics:
     - name: block_io_time_microseconds_total
       help: Total Block I/O time in microseconds
       labels:
+        - name: cgroup_id
+          size: 8
+          decoders:
+            - name: uint
+            - name: cgroup
+              allow_unknown: true
         - name: device
           size: 4
           decoders:
